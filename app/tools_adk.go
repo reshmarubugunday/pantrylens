@@ -3,10 +3,11 @@ package app
 // This file is the thin ADK adapter layer: it wraps the framework-agnostic
 // logic in pantrylens/core as ADK tools. Every handler below does almost
 // nothing itself -- it converts between the tool's argument/result structs
-// and core's plain Go types, and delegates the actual work to registry.
-// Keeping that split means core stays testable without ADK, Gemini, or a
-// network connection (see core/tools_test.go), and this file stays small
-// enough to read in one pass.
+// and core's plain Go types, and delegates the actual work to the
+// *core.Registry passed into BuildTools (see agent.go's newRegistry,
+// which picks in-memory vs Firestore-backed). Keeping that split means
+// core stays testable without ADK, Gemini, or a network connection (see
+// core/tools_test.go), and this file stays small enough to read in one pass.
 //
 // NOTE: this file cannot be compiled in the environment PantryLens was
 // scaffolded in -- google.golang.org/adk/v2 requires Go 1.26+ and open
@@ -25,12 +26,6 @@ import (
 	"google.golang.org/adk/v2/tool/functiontool"
 )
 
-// registry is process-local state for this scaffold (mirrors the Python
-// version's in-memory dict). Swap for a Firestore-backed implementation
-// before deploying -- see the build plan's Day 4 -- without needing to
-// change any of the tool signatures below.
-var registry = core.NewRegistry()
-
 // --- list_lens_presets -------------------------------------------------
 
 type listLensPresetsArgs struct{}
@@ -39,7 +34,7 @@ type listLensPresetsResult struct {
 	Lenses []core.LensSummary `json:"lenses" jsonschema:"the available dietary lenses, built-in and custom"`
 }
 
-func newListLensPresetsTool() (tool.Tool, error) {
+func newListLensPresetsTool(registry *core.Registry) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name: "list_lens_presets",
 		Description: "List all available dietary lenses (built-in and any custom ones " +
@@ -81,7 +76,7 @@ func toLensOutput(l core.DietaryLens) lensOutput {
 	}
 }
 
-func newGetLensPresetTool() (tool.Tool, error) {
+func newGetLensPresetTool(registry *core.Registry) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name:        "get_lens_preset",
 		Description: "Fetch the full definition of a dietary lens by name.",
@@ -111,7 +106,7 @@ type saveCustomLensResult struct {
 	Saved string `json:"saved" jsonschema:"the name of the lens that was saved"`
 }
 
-func newSaveCustomLensTool() (tool.Tool, error) {
+func newSaveCustomLensTool(registry *core.Registry) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name: "save_custom_lens",
 		Description: "Create (or overwrite) a custom dietary lens for this session. Use this " +
@@ -147,7 +142,7 @@ type checkRecipeArgs struct {
 	MacroTolerancePct int      `json:"macroTolerancePct,omitempty" jsonschema:"how far macros may drift from the lens's targets (percent) before being flagged as a warning; defaults to 25"`
 }
 
-func newCheckRecipeAgainstLensTool() (tool.Tool, error) {
+func newCheckRecipeAgainstLensTool(registry *core.Registry) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name: "check_recipe_against_lens",
 		Description: "Validate a proposed recipe against a named dietary lens before presenting " +
@@ -168,14 +163,50 @@ func newCheckRecipeAgainstLensTool() (tool.Tool, error) {
 	})
 }
 
-// BuildTools constructs every tool the Recipe Concierge agent uses.
-func BuildTools() ([]tool.Tool, error) {
+// --- export_recipe_to_doc -----------------------------------------------
+
+type exportRecipeToDocArgs struct {
+	Title       string   `json:"title" jsonschema:"the recipe's title"`
+	Ingredients []string `json:"ingredients" jsonschema:"the recipe's ingredient list, with quantities"`
+	Steps       []string `json:"steps" jsonschema:"the recipe's numbered steps, in order"`
+	Notes       string   `json:"notes,omitempty" jsonschema:"optional notes, e.g. why this recipe fits the active dietary lens"`
+}
+
+type exportRecipeToDocResult struct {
+	DocURL string `json:"docUrl" jsonschema:"the shareable edit URL of the newly created Google Doc"`
+}
+
+func newExportRecipeToDocTool() (tool.Tool, error) {
+	return functiontool.New(functiontool.Config{
+		Name: "export_recipe_to_doc",
+		Description: "Export a finalized recipe to a new Google Doc and return its shareable link. " +
+			"Only call this for a recipe the user has confirmed they want, and that already passed " +
+			"check_recipe_against_lens -- never export an unvalidated draft. Offer this after the " +
+			"user seems happy with a recipe; don't call it automatically on every revision.",
+	}, func(ctx agent.Context, args exportRecipeToDocArgs) (exportRecipeToDocResult, error) {
+		docURL, err := exportRecipeToDoc(ctx, FinalizedRecipe{
+			Title:       args.Title,
+			Ingredients: args.Ingredients,
+			Steps:       args.Steps,
+			Notes:       args.Notes,
+		})
+		if err != nil {
+			return exportRecipeToDocResult{}, err
+		}
+		return exportRecipeToDocResult{DocURL: docURL}, nil
+	})
+}
+
+// BuildTools constructs every tool the Recipe Concierge agent uses, backed
+// by the given lens registry (see core.NewRegistry / core.NewFirestoreRegistry).
+func BuildTools(registry *core.Registry) ([]tool.Tool, error) {
 	var tools []tool.Tool
 	for _, build := range []func() (tool.Tool, error){
-		newListLensPresetsTool,
-		newGetLensPresetTool,
-		newSaveCustomLensTool,
-		newCheckRecipeAgainstLensTool,
+		func() (tool.Tool, error) { return newListLensPresetsTool(registry) },
+		func() (tool.Tool, error) { return newGetLensPresetTool(registry) },
+		func() (tool.Tool, error) { return newSaveCustomLensTool(registry) },
+		func() (tool.Tool, error) { return newCheckRecipeAgainstLensTool(registry) },
+		newExportRecipeToDocTool,
 	} {
 		t, err := build()
 		if err != nil {

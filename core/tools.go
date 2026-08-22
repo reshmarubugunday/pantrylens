@@ -7,30 +7,69 @@ import (
 	"sync"
 )
 
-// Registry holds custom, user-defined lenses created during a session, on
-// top of the built-in presets. It's safe for concurrent use.
-//
-// This is an in-memory stand-in for what should be a Firestore-backed store
-// once this moves past local testing (see the build plan's Day 4) -- the
-// method signatures below are written so that swap doesn't touch callers.
-type Registry struct {
-	mu     sync.RWMutex
-	custom map[string]DietaryLens
+// LensStore is where a Registry keeps custom, user-defined lenses (the
+// built-in presets always come from BuiltInLenses() regardless of store).
+// The default is an in-memory map (see newInMemoryLensStore); see
+// firestore_store.go for a Firestore-backed implementation and
+// NewFirestoreRegistry, used so custom lenses survive process restarts
+// (e.g. Cloud Run cold starts) once this moves past local testing.
+type LensStore interface {
+	List() []DietaryLens
+	Get(name string) (DietaryLens, bool)
+	Save(lens DietaryLens)
 }
 
-// NewRegistry returns a registry seeded with just the built-in presets.
+// Registry holds custom, user-defined lenses created during a session, on
+// top of the built-in presets. It's safe for concurrent use as long as its
+// LensStore is (both implementations in this package are).
+type Registry struct {
+	store LensStore
+}
+
+// NewRegistry returns a registry backed by an in-memory store, seeded with
+// just the built-in presets.
 func NewRegistry() *Registry {
-	return &Registry{custom: make(map[string]DietaryLens)}
+	return &Registry{store: newInMemoryLensStore()}
 }
 
 func (r *Registry) all() map[string]DietaryLens {
 	all := BuiltInLenses()
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	for name, lens := range r.custom {
-		all[name] = lens
+	for _, lens := range r.store.List() {
+		all[lens.Name] = lens
 	}
 	return all
+}
+
+type inMemoryLensStore struct {
+	mu     sync.RWMutex
+	custom map[string]DietaryLens
+}
+
+func newInMemoryLensStore() *inMemoryLensStore {
+	return &inMemoryLensStore{custom: make(map[string]DietaryLens)}
+}
+
+func (s *inMemoryLensStore) List() []DietaryLens {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	lenses := make([]DietaryLens, 0, len(s.custom))
+	for _, lens := range s.custom {
+		lenses = append(lenses, lens)
+	}
+	return lenses
+}
+
+func (s *inMemoryLensStore) Get(name string) (DietaryLens, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	lens, ok := s.custom[name]
+	return lens, ok
+}
+
+func (s *inMemoryLensStore) Save(lens DietaryLens) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.custom[lens.Name] = lens
 }
 
 // LensSummary is the shape returned by ListLensPresets -- enough for an
@@ -62,9 +101,7 @@ func (r *Registry) GetLensPreset(name string) (DietaryLens, error) {
 
 // SaveCustomLens creates or overwrites a custom lens for this registry.
 func (r *Registry) SaveCustomLens(lens DietaryLens) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.custom[lens.Name] = lens
+	r.store.Save(lens)
 }
 
 // CheckRecipeInput is the input to CheckRecipeAgainstLens.

@@ -11,18 +11,21 @@ full parity with the Python SDK for tools, multi-turn agents, and Gemini.
 ## Two modules, on purpose
 
 ```
-core/     module: pantrylens/core   -- zero external dependencies
+core/     module: pantrylens/core   -- lens model + compliance logic, no external deps;
+                                        Firestore is an opt-in storage backend (see below)
 app/      module: pantrylens/app    -- imports google.golang.org/adk/v2, genai
 ```
 
 `core` holds the dietary-lens model and the deterministic compliance-check
 logic — the same split as the Python version's `tools.py`, just made
-structural here instead of a comment. Because it imports nothing but the Go
-standard library, **it's the one part of this port that's actually verified
-in the environment PantryLens was built in**: `gofmt`, `go vet`, and
-`go test` all ran clean here, 8/8 tests passing (ported line-for-line from
-the Python test suite, plus the same substring-vs-token-overlap fix that
-bug caught originally).
+structural here instead of a comment. The lens model, the compliance
+checker, and their tests (`core/tools_test.go`) import nothing but the Go
+standard library: `gofmt`, `go vet`, and `go test` all run clean with zero
+setup, 8/8 tests passing. The one exception is `core/firestore_store.go`,
+an opt-in `LensStore` implementation pulled in only if you use
+`core.NewFirestoreRegistry` (see "Firestore-backed lens storage" below) --
+it's the only file in the module that imports anything beyond stdlib, and
+the existing tests don't exercise it.
 
 `app` is the ADK wiring — the agent, the tool adapters, the CLI entrypoint.
 It's written directly against the real, current ADK Go API (I read the
@@ -112,10 +115,13 @@ go test ./... -v
 
 ## Important: verify the model name before you submit
 
-`ModelName` in `app/agent.go` is `"gemini-2.0-flash"` — a placeholder, same
-caveat as the Python version. **The hackathon requires Gemini 3.5 Flash or
-newer.** Check the current model ID in the Model Garden / Gemini API docs
-and update it before you submit.
+`ModelName` in `app/agent.go` is now `"gemini-3.5-flash"` — matching the
+pinned `google.golang.org/genai` SDK's own current example code, not a
+placeholder anymore. **The hackathon requires Gemini 3.5 Flash or newer.**
+Model availability can still vary by GCP project/region, so run the agent
+once against your own project (`go run . console`) and confirm you get a
+real response, not a model-not-found error, before you submit. If it's
+unavailable, check Model Garden for the closest current name.
 
 ## A known simplification, called out on purpose
 
@@ -126,9 +132,58 @@ product. See the doc comment above `mentions()` in `core/tools.go` for the
 full explanation — it's a fine thing to mention in the submission's
 "learnings" section.
 
+## Firestore-backed lens storage (optional)
+
+By default the agent uses an in-memory lens registry (`core.NewRegistry`) --
+custom lenses created via `save_custom_lens` live only for the process's
+lifetime. Set `GOOGLE_CLOUD_PROJECT` and the agent will instead use
+`core.NewFirestoreRegistry` (collection `dietary_lenses`), so custom lenses
+survive restarts -- useful once you're running on Cloud Run, where a cold
+start would otherwise lose them. If Firestore construction fails for any
+reason (auth, network), it logs a warning and falls back to in-memory, so
+local/offline dev keeps working unchanged. Built-in presets always work
+either way -- they come from `BuiltInLenses()`, not the store.
+
+## Exporting a recipe to Google Docs
+
+Once the user is happy with a validated recipe, the agent can call
+`export_recipe_to_doc` (see `app/export_docs.go`) to create a real, shareable
+Google Doc via the Docs API. This is demoed against your own
+`gcloud auth application-default login` user credentials (local `console`/
+`web`); a doc created under a Cloud Run service account would be owned by
+that service account and invisible to a human without an extra Drive-sharing
+step this scaffold doesn't implement, so don't rely on this feature through
+a Cloud Run deployment. If you hit a 403 calling it, your ADC likely needs
+broader scopes:
+
+```bash
+gcloud auth application-default login \
+  --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/documents,https://www.googleapis.com/auth/drive.file
+```
+
+## Deploy to Cloud Run
+
+The `web` launcher already binds `:8080` on all interfaces by default, which
+matches what Cloud Run expects, so no code changes are needed:
+
+```bash
+gcloud run deploy pantrylens --source . --region us-central1 \
+  --set-env-vars GOOGLE_CLOUD_PROJECT=your-project-id,GOOGLE_CLOUD_LOCATION=us-central1,GOOGLE_GENAI_USE_ENTERPRISE=1 \
+  --allow-unauthenticated
+
+gcloud projects add-iam-policy-binding your-project-id \
+  --member="serviceAccount:<cloud-run-service-account>" --role="roles/aiplatform.user"
+# If using Firestore-backed lens storage too:
+gcloud projects add-iam-policy-binding your-project-id \
+  --member="serviceAccount:<cloud-run-service-account>" --role="roles/datastore.user"
+```
+
+Demo the core ingredients → lens → recipe loop through the deployed URL;
+keep the Docs export feature demoed locally (see above).
+
 ## Next step in the plan
 
-Same Day 3/4 items as before — deepen the multi-turn refinement loop, and
-swap `core.Registry`'s in-memory maps for Firestore-backed storage. Because
-`Registry`'s methods are the only thing `tools_adk.go` calls into, that
-swap stays contained to `core/tools.go`.
+See the hackathon completion plan for the remaining prioritized work
+(live model-name verification, scripted multi-turn QA, and Devpost
+submission prep) -- the core loop, Docs export, Firestore-backed storage,
+and Cloud Run deployment described above are implemented.
