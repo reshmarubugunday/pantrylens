@@ -87,24 +87,38 @@ README; the short version for this Go port:
 ```bash
 gcloud auth application-default login
 gcloud config set project YOUR_PROJECT_ID
-gcloud services enable aiplatform.googleapis.com firestore.googleapis.com run.googleapis.com docs.googleapis.com
+gcloud services enable aiplatform.googleapis.com firestore.googleapis.com run.googleapis.com
 
 export GOOGLE_GENAI_USE_ENTERPRISE=1
 export GOOGLE_CLOUD_PROJECT=your-real-project-id
-export GOOGLE_CLOUD_LOCATION=us-central1
+export GOOGLE_CLOUD_LOCATION=global
 ```
 
 `gemini.NewModel` in `app/agent.go` is called with an empty
 `&genai.ClientConfig{}`, which resolves backend/project/location from
 those env vars automatically — no API key needed in this mode.
 
+**Use `global` for `GOOGLE_CLOUD_LOCATION`, not a specific region.**
+Confirmed live against a real project: `gemini-3.5-flash` 404s as a
+publisher model on regional endpoints (e.g. `us-central1`) but resolves
+fine on `global`. `GOOGLE_CLOUD_LOCATION` only affects where the Gemini
+client sends requests here (Firestore, if you're using it, resolves its
+own location from the database itself, not this env var), so this is safe
+to set globally without affecting anything else.
+
 ## Run it
 
 ```bash
 cd app/cmd/pantrylens
-go run . console   # chat with the agent in your terminal
-go run . web       # local web UI, prints a URL to open
+go run . console      # chat with the agent in your terminal
+go run . web ui api   # local web server: PantryLens's own UI + its REST API
 ```
+
+Note: `web` alone starts no sub-servers -- sub-launchers must be named
+explicitly. Confirmed against a live ADK v2.0.0 build.
+
+`ui` is PantryLens's own frontend (`app/cmd/pantrylens/frontend`), not
+ADK's built-in `webui` -- see "PantryLens's own web UI" below for why.
 
 ## Run the core tests (works right now, no setup needed)
 
@@ -144,31 +158,41 @@ reason (auth, network), it logs a warning and falls back to in-memory, so
 local/offline dev keeps working unchanged. Built-in presets always work
 either way -- they come from `BuiltInLenses()`, not the store.
 
-## Exporting a recipe to Google Docs
+## Saving and viewing a recipe
 
-Once the user is happy with a validated recipe, the agent can call
-`export_recipe_to_doc` (see `app/export_docs.go`) to create a real, shareable
-Google Doc via the Docs API. This is demoed against your own
-`gcloud auth application-default login` user credentials (local `console`/
-`web`); a doc created under a Cloud Run service account would be owned by
-that service account and invisible to a human without an extra Drive-sharing
-step this scaffold doesn't implement, so don't rely on this feature through
-a Cloud Run deployment. If you hit a 403 calling it, your ADC likely needs
-broader scopes:
+Every recipe card has its own "Save & view" button. Clicking it `POST`s the
+card's full details to `/recipes` (see `app/cmd/pantrylens/frontend
+/frontend.go` and `recipe_view.go`), which mints a random ID, persists it via
+`core.RecipeStore` (Firestore-backed when `GOOGLE_CLOUD_PROJECT` is set, same
+fallback-to-in-memory pattern as the lens registry and preference store --
+see `app/agent.go`'s `NewRecipeStore`), and opens `/recipes/{id}` in a new
+tab: a standalone page reusing the exact same `.recipe-card` styling as the
+in-chat card (same `styles.css`, same origin), not a Google Doc or any other
+external service -- nothing here needs Drive/Docs scopes or credentials
+beyond what Vertex AI and Firestore already use.
 
-```bash
-gcloud auth application-default login \
-  --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/documents,https://www.googleapis.com/auth/drive.file
-```
+## PantryLens's own web UI
+
+ADK's built-in `webui` sublauncher is a developer console (Events/Traces/
+State/Artifacts panels) -- useful for debugging, but not something you'd
+want to show a hackathon judge as "the product." `app/cmd/pantrylens/frontend`
+is a small, self-contained chat frontend (plain HTML/CSS/JS, no build step)
+registered as its own `ui` sublauncher instead, serving at `/` and talking
+to ADK's REST API at same-origin `/api/...`. Being same-origin means no
+CORS/public-URL configuration is needed -- a real advantage over `webui`,
+whose browser-side JS defaults to calling back to
+`http://localhost:8080/api`, which only works when server and browser share
+a machine (not true on Cloud Run without extra configuration).
 
 ## Deploy to Cloud Run
 
 The `web` launcher already binds `:8080` on all interfaces by default, which
-matches what Cloud Run expects, so no code changes are needed:
+matches what Cloud Run expects, so no code changes are needed beyond what's
+already in the `Dockerfile`:
 
 ```bash
 gcloud run deploy pantrylens --source . --region us-central1 \
-  --set-env-vars GOOGLE_CLOUD_PROJECT=your-project-id,GOOGLE_CLOUD_LOCATION=us-central1,GOOGLE_GENAI_USE_ENTERPRISE=1 \
+  --set-env-vars GOOGLE_CLOUD_PROJECT=your-project-id,GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_ENTERPRISE=1 \
   --allow-unauthenticated
 
 gcloud projects add-iam-policy-binding your-project-id \
@@ -178,12 +202,13 @@ gcloud projects add-iam-policy-binding your-project-id \
   --member="serviceAccount:<cloud-run-service-account>" --role="roles/datastore.user"
 ```
 
-Demo the core ingredients → lens → recipe loop through the deployed URL;
-keep the Docs export feature demoed locally (see above).
+Use `global` for `GOOGLE_CLOUD_LOCATION`, not a specific region -- see
+above. Demo the whole ingredients → lens → recipe → save-and-view loop
+through the deployed URL; nothing in it needs local-only credentials.
 
 ## Next step in the plan
 
 See the hackathon completion plan for the remaining prioritized work
 (live model-name verification, scripted multi-turn QA, and Devpost
-submission prep) -- the core loop, Docs export, Firestore-backed storage,
+submission prep) -- the core loop, save-and-view, Firestore-backed storage,
 and Cloud Run deployment described above are implemented.

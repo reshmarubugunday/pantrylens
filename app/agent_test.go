@@ -43,8 +43,13 @@ func TestComplianceCheckIsCalledBeforeRecipesAreShown(t *testing.T) {
 		t.Fatalf("runner.New: %v", err)
 	}
 
+	// Servings must be given up front -- the agent is instructed to ask for
+	// a serving count rather than assume one (see prompts.go step 1), so an
+	// otherwise-complete request missing it gets a clarifying question back
+	// instead of a recipe, and never reaches check_recipe_against_lens at
+	// all in that single turn.
 	msg := genai.NewContentFromText(
-		"I have chicken breast, spinach, and oats. Use the Athletic Performance lens and suggest a recipe.",
+		"I have chicken breast, spinach, and oats. Use the Athletic Performance lens and suggest a recipe for 2 servings.",
 		genai.RoleUser,
 	)
 

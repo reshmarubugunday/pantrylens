@@ -81,3 +81,42 @@ func newRegistry(ctx context.Context) *core.Registry {
 	}
 	return registry
 }
+
+// NewPreferenceStore builds a Firestore-backed preference store when
+// GOOGLE_CLOUD_PROJECT is set, mirroring newRegistry's fallback-to-in-memory
+// behavior. Exported (unlike newRegistry) because it's also needed outside
+// the agent itself -- the frontend's own /profile endpoints read and write
+// preferences directly, without going through the agent or its tools (see
+// ../cmd/pantrylens/frontend/frontend.go), since they're plain structured
+// fields the intake form prefills, not something the model reasons about.
+func NewPreferenceStore(ctx context.Context) core.PreferenceStore {
+	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if projectID == "" {
+		return core.NewPreferenceStore()
+	}
+	store, err := core.NewFirestorePreferenceStore(ctx, projectID)
+	if err != nil {
+		log.Printf("Firestore preference store unavailable (%v); falling back to in-memory", err)
+		return core.NewPreferenceStore()
+	}
+	return store
+}
+
+// NewRecipeStore builds a Firestore-backed recipe store when
+// GOOGLE_CLOUD_PROJECT is set, mirroring NewPreferenceStore's
+// fallback-to-in-memory behavior -- the frontend's own POST/GET /recipes
+// endpoints save and serve a recipe's "open in a new tab" view directly,
+// without going through the agent (see ../cmd/pantrylens/frontend
+// /frontend.go).
+func NewRecipeStore(ctx context.Context) core.RecipeStore {
+	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if projectID == "" {
+		return core.NewRecipeStore()
+	}
+	store, err := core.NewFirestoreRecipeStore(ctx, projectID)
+	if err != nil {
+		log.Printf("Firestore recipe store unavailable (%v); falling back to in-memory", err)
+		return core.NewRecipeStore()
+	}
+	return store
+}

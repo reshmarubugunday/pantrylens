@@ -8,20 +8,26 @@ import (
 )
 
 // LensStore is where a Registry keeps custom, user-defined lenses (the
-// built-in presets always come from BuiltInLenses() regardless of store).
-// The default is an in-memory map (see newInMemoryLensStore); see
-// firestore_store.go for a Firestore-backed implementation and
-// NewFirestoreRegistry, used so custom lenses survive process restarts
-// (e.g. Cloud Run cold starts) once this moves past local testing.
+// built-in presets always come from BuiltInLenses() regardless of store),
+// scoped per user so two different callers' custom lenses never collide or
+// overwrite each other. The default is an in-memory map (see
+// newInMemoryLensStore); see firestore_store.go for a Firestore-backed
+// implementation and NewFirestoreRegistry, used so custom lenses survive
+// process restarts (e.g. Cloud Run cold starts) once this moves past local
+// testing.
 type LensStore interface {
-	List() []DietaryLens
-	Get(name string) (DietaryLens, bool)
-	Save(lens DietaryLens)
+	List(userID string) []DietaryLens
+	Get(userID, name string) (DietaryLens, bool)
+	Save(userID string, lens DietaryLens)
 }
 
 // Registry holds custom, user-defined lenses created during a session, on
-// top of the built-in presets. It's safe for concurrent use as long as its
-// LensStore is (both implementations in this package are).
+// top of the built-in presets. It's shared by every user of the process --
+// callers must pass the calling user's ID into every method so custom
+// lenses stay scoped to the user who created them; the built-in presets
+// are global and returned to everyone regardless of ID. It's safe for
+// concurrent use as long as its LensStore is (both implementations in this
+// package are).
 type Registry struct {
 	store LensStore
 }
@@ -32,9 +38,9 @@ func NewRegistry() *Registry {
 	return &Registry{store: newInMemoryLensStore()}
 }
 
-func (r *Registry) all() map[string]DietaryLens {
+func (r *Registry) all(userID string) map[string]DietaryLens {
 	all := BuiltInLenses()
-	for _, lens := range r.store.List() {
+	for _, lens := range r.store.List(userID) {
 		all[lens.Name] = lens
 	}
 	return all
@@ -42,34 +48,38 @@ func (r *Registry) all() map[string]DietaryLens {
 
 type inMemoryLensStore struct {
 	mu     sync.RWMutex
-	custom map[string]DietaryLens
+	custom map[string]map[string]DietaryLens // userID -> lens name -> lens
 }
 
 func newInMemoryLensStore() *inMemoryLensStore {
-	return &inMemoryLensStore{custom: make(map[string]DietaryLens)}
+	return &inMemoryLensStore{custom: make(map[string]map[string]DietaryLens)}
 }
 
-func (s *inMemoryLensStore) List() []DietaryLens {
+func (s *inMemoryLensStore) List(userID string) []DietaryLens {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	lenses := make([]DietaryLens, 0, len(s.custom))
-	for _, lens := range s.custom {
+	byName := s.custom[userID]
+	lenses := make([]DietaryLens, 0, len(byName))
+	for _, lens := range byName {
 		lenses = append(lenses, lens)
 	}
 	return lenses
 }
 
-func (s *inMemoryLensStore) Get(name string) (DietaryLens, bool) {
+func (s *inMemoryLensStore) Get(userID, name string) (DietaryLens, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	lens, ok := s.custom[name]
+	lens, ok := s.custom[userID][name]
 	return lens, ok
 }
 
-func (s *inMemoryLensStore) Save(lens DietaryLens) {
+func (s *inMemoryLensStore) Save(userID string, lens DietaryLens) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.custom[lens.Name] = lens
+	if s.custom[userID] == nil {
+		s.custom[userID] = make(map[string]DietaryLens)
+	}
+	s.custom[userID][lens.Name] = lens
 }
 
 // LensSummary is the shape returned by ListLensPresets -- enough for an
@@ -79,9 +89,10 @@ type LensSummary struct {
 	CustomRules string `json:"customRules"`
 }
 
-// ListLensPresets lists all available dietary lenses, built-in and custom.
-func (r *Registry) ListLensPresets() []LensSummary {
-	all := r.all()
+// ListLensPresets lists all dietary lenses available to userID: every
+// built-in preset plus that user's own custom lenses (not other users').
+func (r *Registry) ListLensPresets(userID string) []LensSummary {
+	all := r.all(userID)
 	summaries := make([]LensSummary, 0, len(all))
 	for _, lens := range all {
 		summaries = append(summaries, LensSummary{Name: lens.Name, CustomRules: lens.CustomRules})
@@ -89,9 +100,10 @@ func (r *Registry) ListLensPresets() []LensSummary {
 	return summaries
 }
 
-// GetLensPreset fetches the full definition of a lens by exact name.
-func (r *Registry) GetLensPreset(name string) (DietaryLens, error) {
-	all := r.all()
+// GetLensPreset fetches the full definition of a lens by exact name, from
+// userID's own custom lenses or the built-in presets.
+func (r *Registry) GetLensPreset(userID, name string) (DietaryLens, error) {
+	all := r.all(userID)
 	lens, ok := all[name]
 	if !ok {
 		return DietaryLens{}, fmt.Errorf("no lens named %q; call ListLensPresets to see options", name)
@@ -99,20 +111,112 @@ func (r *Registry) GetLensPreset(name string) (DietaryLens, error) {
 	return lens, nil
 }
 
-// SaveCustomLens creates or overwrites a custom lens for this registry.
-func (r *Registry) SaveCustomLens(lens DietaryLens) {
-	r.store.Save(lens)
+// SaveCustomLens creates or overwrites a custom lens, scoped to userID.
+func (r *Registry) SaveCustomLens(userID string, lens DietaryLens) {
+	r.store.Save(userID, lens)
+}
+
+// CombineLenses merges one or more named lenses (built-in and/or userID's
+// own custom ones) into a single synthesized DietaryLens representing "all
+// of these must hold at once" -- e.g. Vegetarian + GERD -- so a recipe can
+// be drafted and checked against the whole combination in one pass instead
+// of the agent juggling several separate lenses itself. It's a pure,
+// on-the-fly composition: the result is never saved back into the
+// registry, and names(1) degenerates to plain GetLensPreset.
+//
+// The merge rules, applied field by field across all named lenses in
+// order:
+//   - AvoidIngredients / PreferIngredients: union, de-duplicated -- avoid
+//     anything any selected lens avoids; prefer anything any of them
+//     prefers.
+//   - MacroTargets: first non-nil value wins per field (Calories, ProteinG,
+//     CarbsG, FatG independently) -- if two selected lenses both set a
+//     macro target, the first-listed one's target applies for that field,
+//     rather than attempting to average or reconcile genuinely conflicting
+//     numeric targets.
+//   - CustomRules: every non-empty rule text is kept, each prefixed with
+//     its lens's name in brackets, so the model sees exactly which rule
+//     came from which lens rather than an unattributed merged blob.
+//   - NotesStyle: "per-ingredient rationale" wins over "brief" if any
+//     selected lens asks for it -- more thorough is the safer default when
+//     merging several sets of constraints into one recipe.
+//   - Name: every selected lens's name, joined with " + ".
+func (r *Registry) CombineLenses(userID string, names []string) (DietaryLens, error) {
+	if len(names) == 0 {
+		return DietaryLens{}, fmt.Errorf("at least one lens name is required")
+	}
+	if len(names) == 1 {
+		return r.GetLensPreset(userID, names[0])
+	}
+
+	all := r.all(userID)
+	var combined DietaryLens
+	var displayNames, ruleParts []string
+	avoidSeen := map[string]bool{}
+	preferSeen := map[string]bool{}
+
+	for _, name := range names {
+		lens, ok := all[name]
+		if !ok {
+			return DietaryLens{}, fmt.Errorf("no lens named %q; call ListLensPresets to see options", name)
+		}
+		displayNames = append(displayNames, lens.Name)
+
+		for _, a := range lens.AvoidIngredients {
+			if !avoidSeen[a] {
+				avoidSeen[a] = true
+				combined.AvoidIngredients = append(combined.AvoidIngredients, a)
+			}
+		}
+		for _, p := range lens.PreferIngredients {
+			if !preferSeen[p] {
+				preferSeen[p] = true
+				combined.PreferIngredients = append(combined.PreferIngredients, p)
+			}
+		}
+
+		if combined.MacroTargets.Calories == nil {
+			combined.MacroTargets.Calories = lens.MacroTargets.Calories
+		}
+		if combined.MacroTargets.ProteinG == nil {
+			combined.MacroTargets.ProteinG = lens.MacroTargets.ProteinG
+		}
+		if combined.MacroTargets.CarbsG == nil {
+			combined.MacroTargets.CarbsG = lens.MacroTargets.CarbsG
+		}
+		if combined.MacroTargets.FatG == nil {
+			combined.MacroTargets.FatG = lens.MacroTargets.FatG
+		}
+
+		if lens.CustomRules != "" {
+			ruleParts = append(ruleParts, fmt.Sprintf("[%s] %s", lens.Name, lens.CustomRules))
+		}
+		if lens.NotesStyle == "per-ingredient rationale" {
+			combined.NotesStyle = "per-ingredient rationale"
+		} else if combined.NotesStyle == "" {
+			combined.NotesStyle = lens.NotesStyle
+		}
+	}
+
+	combined.Name = strings.Join(displayNames, " + ")
+	combined.CustomRules = strings.Join(ruleParts, " ")
+	return combined, nil
 }
 
 // CheckRecipeInput is the input to CheckRecipeAgainstLens.
 type CheckRecipeInput struct {
+	// UserID scopes which caller's custom lenses LensNames may resolve to,
+	// on top of the built-in presets available to everyone.
+	UserID      string
 	RecipeTitle string
 	Ingredients []string
-	LensName    string
-	Calories    *int
-	ProteinG    *int
-	CarbsG      *int
-	FatG        *int
+	// LensNames is one or more active lens names, checked jointly -- see
+	// Registry.CombineLenses. A single name behaves exactly as before.
+	LensNames []string
+	Calories  *int
+	ProteinG  *int
+	CarbsG    *int
+	FatG      *int
 	// MacroTolerancePct is how far macros may drift from the lens's targets
 	// (as a percentage) before being flagged as a warning. Zero means "use
 	// the default" (25).
@@ -196,13 +300,13 @@ func macroWarning(value, target *int, label string, tolerancePct int) string {
 	return ""
 }
 
-// CheckRecipeAgainstLens validates a proposed recipe against a named
-// dietary lens. Always call this after drafting a candidate recipe and
-// before showing it to the user -- it's a deterministic check (not another
-// model call), so violations are caught reliably rather than relying on
-// the model's own judgment every time.
+// CheckRecipeAgainstLens validates a proposed recipe against one or more
+// active dietary lenses (see CombineLenses). Always call this after
+// drafting a candidate recipe and before showing it to the user -- it's a
+// deterministic check (not another model call), so violations are caught
+// reliably rather than relying on the model's own judgment every time.
 func (r *Registry) CheckRecipeAgainstLens(in CheckRecipeInput) (CheckRecipeResult, error) {
-	lens, err := r.GetLensPreset(in.LensName)
+	lens, err := r.CombineLenses(in.UserID, in.LensNames)
 	if err != nil {
 		return CheckRecipeResult{}, err
 	}
@@ -253,7 +357,7 @@ func (r *Registry) CheckRecipeAgainstLens(in CheckRecipeInput) (CheckRecipeResul
 
 	return CheckRecipeResult{
 		RecipeTitle: in.RecipeTitle,
-		LensName:    in.LensName,
+		LensName:    lens.Name,
 		Compliant:   len(violations) == 0,
 		Violations:  violations,
 		Warnings:    warnings,

@@ -1,0 +1,771 @@
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --border: #e3e6ec;
+  --text: #101828;
+  --text-muted: #667085;
+  --accent: #0d9488;
+  --accent-hover: #0f766e;
+  --accent-text: #ffffff;
+  --focus-ring: rgba(13, 148, 136, 0.16);
+  --bubble-user: #101828;
+  --bubble-user-text: #f7f8fa;
+  --bubble-assistant: #ffffff;
+  --bubble-assistant-text: #101828;
+  --tool-chip-bg: #f0fdfa;
+  --tool-chip-text: #0f766e;
+  --compliant: #16a34a;
+  --violation: #dc2626;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 2px 8px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0e14;
+    --surface: #151a23;
+    --border: #262c38;
+    --text: #f0f2f5;
+    --text-muted: #94a0b4;
+    --accent: #2dd4bf;
+    --accent-hover: #5eead4;
+    --accent-text: #0b0e14;
+    --focus-ring: rgba(45, 212, 191, 0.22);
+    --bubble-user: #2dd4bf;
+    --bubble-user-text: #0b0e14;
+    --bubble-assistant: #1a2029;
+    --bubble-assistant-text: #f0f2f5;
+    --tool-chip-bg: #113b38;
+    --tool-chip-text: #5eead4;
+    --compliant: #4ade80;
+    --violation: #f87171;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Defense-in-depth: without this, an author rule at equal specificity to
+   the UA's `[hidden] { display: none }` (e.g. `.composer { display: flex }`
+   below) wins the cascade tie by source order and defeats the hidden
+   attribute, rendering the element anyway. */
+[hidden] {
+  display: none !important;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-mark {
+  font-size: 22px;
+}
+
+.brand-name {
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+.btn-ghost {
+  display: inline-block;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.btn-ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.msg {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  line-height: 1.45;
+  font-size: 14.5px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.msg.user {
+  align-self: flex-end;
+  background: var(--bubble-user);
+  color: var(--bubble-user-text);
+  border-bottom-right-radius: 4px;
+}
+
+.msg.assistant {
+  align-self: flex-start;
+  background: var(--bubble-assistant);
+  color: var(--bubble-assistant-text);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+
+.msg.assistant a {
+  color: var(--accent);
+}
+
+.tool-chip {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--tool-chip-bg);
+  color: var(--tool-chip-text);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.tool-chip.compliant {
+  color: var(--compliant);
+}
+
+.tool-chip.violation {
+  color: var(--violation);
+}
+
+.typing {
+  align-self: flex-start;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 4px 4px;
+}
+
+.error {
+  align-self: center;
+  color: var(--violation);
+  font-size: 13px;
+  text-align: center;
+  padding: 8px;
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg);
+}
+
+.composer input {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 14.5px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.composer input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.composer button {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 10px;
+  padding: 0 18px;
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.composer button:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.composer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.welcome {
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
+  padding: 24px 12px;
+}
+
+/* --- Intake form --- */
+
+.intake {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 18px 40px;
+}
+
+.intake-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.intake-title {
+  font-size: 22px;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.intake-sub {
+  margin: -14px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* --- My saved recipes --- */
+
+.my-recipes-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.my-recipes-header .intake-title {
+  margin: 0;
+}
+
+.saved-recipes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.saved-recipe-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  text-decoration: none;
+  color: var(--text);
+  transition: border-color 0.15s ease;
+}
+
+.saved-recipe-item:hover {
+  border-color: var(--accent);
+}
+
+.saved-recipe-item .saved-recipe-title {
+  font-weight: 600;
+  font-size: 14.5px;
+}
+
+.saved-recipe-item .saved-recipe-date {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.saved-recipes-empty {
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
+  padding: 24px 12px;
+}
+
+.saved-recipes-batch-header {
+  font-size: 12.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin: 10px 0 -2px;
+}
+
+.saved-recipes-batch-header:first-child {
+  margin-top: 0;
+}
+
+.saved-recipe-item-grouped {
+  margin-left: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field > label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.field > label .optional {
+  font-weight: 400;
+  text-transform: none;
+}
+
+.chip-input input,
+.field > input[type="text"],
+.field > input[type="number"] {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 14.5px;
+  outline: none;
+  width: 100%;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chip-input input:focus,
+.field > input[type="text"]:focus,
+.field > input[type="number"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.photo-detect-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.photo-detect-status {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.photo-detect-status.error {
+  color: var(--violation);
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--tool-chip-bg);
+  color: var(--tool-chip-text);
+  border-radius: 999px;
+  padding: 6px 8px 6px 12px;
+  font-size: 13.5px;
+}
+
+.chip button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px;
+  opacity: 0.7;
+}
+
+.chip button:hover {
+  opacity: 1;
+}
+
+.mode-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 3px;
+}
+
+.mode-option {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.mode-option:hover {
+  color: var(--text);
+}
+
+.mode-option.active {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Dietary lens multi-select: a wrapping grid of toggle chips (any number
+   can be active at once, e.g. Vegetarian + GERD) rather than the
+   single-select stacked radio cards this used to be -- with 11 presets
+   plus "No restrictions" and "Custom", stacked full-width cards would make
+   the intake form scroll for a long time before reaching the ingredient
+   list past this section. Each chip is a <label> wrapping a visually
+   hidden but still keyboard-focusable checkbox (see .lens-chip input
+   below), matching the accessible label+input pattern the rest of the
+   form already uses, not just a styled <button>. */
+.lens-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lens-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.lens-chip input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lens-chip:hover {
+  border-color: var(--accent);
+}
+
+.lens-chip:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--tool-chip-bg);
+  color: var(--tool-chip-text);
+}
+
+.lens-chip:has(input:focus-visible) {
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.lens-chip-none:has(input:checked) {
+  border-color: var(--text-muted);
+  background: transparent;
+  color: var(--text);
+}
+
+.custom-lens-text {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 14px;
+  min-height: 64px;
+  resize: vertical;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.custom-lens-text:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.quick-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quick-pick {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.quick-pick:hover,
+.quick-pick.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-primary {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 10px;
+  padding: 13px 18px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* --- Recipe cards --- */
+
+.recipe-card {
+  align-self: stretch;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.recipe-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.recipe-card-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.cuisine-badge {
+  background: var(--tool-chip-bg);
+  color: var(--tool-chip-text);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.macro-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.macro-chip {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.recipe-card details {
+  font-size: 13.5px;
+}
+
+.recipe-card summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.recipe-body h4 {
+  margin: 10px 0 4px;
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.recipe-body ul,
+.recipe-body ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.recipe-body li {
+  margin-bottom: 3px;
+}
+
+.lens-note {
+  margin: 0;
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.storage-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.shopping-note {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--tool-chip-text);
+  background: var(--tool-chip-bg);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.need-to-buy-tag {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.export-btn {
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.export-btn:hover {
+  border-color: var(--accent);
+}
+
+.export-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.save-recipe-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  align-self: flex-start;
+}
+
+.save-recipe-row .export-btn {
+  align-self: auto;
+}
+
+.view-saved-link {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.view-saved-link:hover {
+  text-decoration: underline;
+}
+
+.save-all-row {
+  align-self: center;
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.save-all-btn {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 999px;
+  padding: 10px 20px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.save-all-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.save-all-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

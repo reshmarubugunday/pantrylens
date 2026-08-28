@@ -1,16 +1,17 @@
 # PantryLens
 
 **Track:** Collaborative Partner
-**Tech:** Gemini 3.5 Flash · Google ADK Go SDK (`google.golang.org/adk/v2`) · Vertex AI · Firestore · Google Docs API · Cloud Run
+**Tech:** Gemini 3.5 Flash · Google ADK Go SDK (`google.golang.org/adk/v2`) · Vertex AI · Firestore · Cloud Run
 
 ## What it does
 
-Give PantryLens a list of ingredients you have on hand and a "dietary lens" —
-a configurable bundle of rules (allergens to avoid, macro targets,
-health-condition constraints, or anything else) — and it proposes recipes
-that fit, refined conversationally ("more protein," "no dairy," "use up the
-spinach"). Once you're happy with one, it can export it to a real, shareable
-Google Doc.
+Give PantryLens a list of ingredients you have on hand and one or more
+"dietary lenses" — configurable bundles of rules (allergens to avoid, macro
+targets, health-condition constraints, or anything else), stackable so e.g.
+Vegetarian + GERD-friendly both apply to the same recipe at once — and it
+proposes recipes that fit, refined conversationally ("more protein," "no
+dairy," "use up the spinach"). Once you're happy with one, save it to its
+own page and open it in a new tab.
 
 ## The core idea: architectural discipline, not model trust
 
@@ -25,10 +26,15 @@ wiring in `app/`. The split is deliberate: the part of the system that
 decides whether a recipe is safe to show you doesn't depend on the model
 behaving correctly, and can be tested and trusted independently of it.
 
-Two built-in lens presets ship to prove the system is generic, not tuned to
-one person's diet: a GERD + hormonal-balance + macro-target lens, and an
-unrelated Athletic Performance lens. You can also describe your own goals in
-plain language and the agent will save them as a reusable custom lens.
+Eleven built-in lens presets ship to prove the system is generic, not tuned
+to one person's diet: GERD, Athletic Performance, Vegetarian, Vegan,
+Diabetic-Friendly, Heart-Healthy, Gluten-Free, Dairy-Free, Keto, Low-FODMAP,
+and Kidney-Friendly. Any number can be active together -- `CombineLenses` in
+`core/tools.go` merges their avoid/prefer lists, macro targets, and rules
+into one set a recipe has to satisfy all at once, not just whichever lens
+happened to get checked. You can also describe your own goals in plain
+language, on top of any presets, and the agent will save them as a reusable
+custom lens.
 
 ## Tech stack
 
@@ -39,10 +45,12 @@ plain language and the agent will save them as a reusable custom lens.
 - **Firestore** as an opt-in backend for custom lens storage, so lenses
   survive process restarts (e.g. Cloud Run cold starts) instead of living
   only in memory.
-- **Google Docs API** for the "real action" piece: turning a finalized,
-  already-validated recipe into an actual, shareable document rather than
-  leaving it as chat text.
+- **Firestore-backed recipe storage** for the "real action" piece:
+  saving a finalized, already-validated recipe as its own standalone,
+  shareable page (opened in a new tab) rather than leaving it as chat text.
 - **Cloud Run** for deployment.
+- A small, self-contained **web UI** (plain HTML/CSS/JS, no build step)
+  talking to ADK's REST API, in place of ADK's built-in developer console.
 
 ## Learnings and honest limitations
 
@@ -55,11 +63,10 @@ plain language and the agent will save them as a reusable custom lens.
   ingredient judgment; the deterministic checker is a safety net on top of
   that, not a substitute for it. We think this honest boundary is more
   useful to state plainly than to paper over.
-- Docs export currently assumes it's running under your own user
-  credentials (local `console`/`web`), not a Cloud Run service account —
-  a doc created by a service account is invisible to a human without an
-  extra Drive-sharing step we didn't build under deadline. A production
-  version would add that.
+- A saved recipe's link is unguessable (a random 128-bit ID) but not
+  access-controlled or expiring -- anyone with the link can view it,
+  forever. Fine for a hackathon demo; a production version would add
+  expiry and/or scope links to the user who saved them.
 
 ## Repo
 

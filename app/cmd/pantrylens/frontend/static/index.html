@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PantryLens</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🥗</text></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">🥗</span>
+        <span class="brand-name">PantryLens</span>
+      </div>
+      <div class="header-actions">
+        <button id="my-recipes-btn" class="btn-ghost" title="View recipes you've saved">My recipes</button>
+        <button id="new-session" class="btn-ghost" title="Start over">New session</button>
+      </div>
+    </header>
+
+    <!-- Intake form: shown first, composes the opening chat message -->
+    <section id="intake" class="intake">
+      <div class="intake-inner">
+        <h1 class="intake-title">What's in your kitchen?</h1>
+        <p class="intake-sub">Add your ingredients, pick any dietary lenses that apply (combine as many as you need, like Vegetarian + GERD-friendly), and optionally a cuisine -- PantryLens will suggest recipes and check each one against all of your lenses before showing it to you.</p>
+
+        <div class="field">
+          <div class="mode-toggle" id="mode-toggle">
+            <button type="button" class="mode-option active" data-mode="tonight">One meal</button>
+            <button type="button" class="mode-option" data-mode="mealprep">Meal prep (this week)</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Meal type <span class="optional">(optional)</span></label>
+          <div class="quick-picks" id="meal-type-quick-picks">
+            <button type="button" class="quick-pick" data-meal-type="Breakfast">Breakfast</button>
+            <button type="button" class="quick-pick" data-meal-type="Lunch">Lunch</button>
+            <button type="button" class="quick-pick" data-meal-type="Dinner">Dinner</button>
+            <button type="button" class="quick-pick" data-meal-type="Snack">Snack</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="ingredient-input">Ingredients</label>
+          <div class="chip-input" id="ingredient-chip-box">
+            <input id="ingredient-input" type="text" placeholder="Type an ingredient, or paste a list -- press Enter" autocomplete="off" />
+          </div>
+          <div id="ingredient-chips" class="chips"></div>
+          <div class="photo-detect-row">
+            <button type="button" id="photo-detect-btn" class="quick-pick">📷 Detect from a photo</button>
+            <input id="photo-detect-input" type="file" accept="image/*" capture="environment" hidden />
+            <span id="photo-detect-status" class="photo-detect-status" hidden></span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Dietary lens(es) <span class="optional">(pick as many as apply)</span></label>
+          <div id="lens-chips" class="lens-chip-grid">
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="GERD-Friendly" /><span>GERD-Friendly</span></label>
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="Hormonal Balance" /><span>Hormonal Balance</span></label>
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="Macro Target (30g Protein / 40g Carbs / 15g Fat)" /><span>Macro Target (30g Protein / 40g Carbs / 15g Fat)</span></label>
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="Athletic Performance" /><span>Athletic Performance</span></label>
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="Vegetarian" /><span>Vegetarian</span></label>
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="Vegan" /><span>Vegan</span></label>
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="Diabetic-Friendly" /><span>Diabetic-Friendly</span></label>
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="Heart-Healthy (Low-Sodium)" /><span>Heart-Healthy (Low-Sodium)</span></label>
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="Gluten-Free" /><span>Gluten-Free</span></label>
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="Dairy-Free" /><span>Dairy-Free</span></label>
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="Keto (Low-Carb)" /><span>Keto (Low-Carb)</span></label>
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="Low-FODMAP" /><span>Low-FODMAP</span></label>
+            <label class="lens-chip"><input type="checkbox" class="lens-preset-checkbox" value="Kidney-Friendly (Renal)" /><span>Kidney-Friendly (Renal)</span></label>
+            <label class="lens-chip" id="lens-chip-custom"><input type="checkbox" id="lens-custom-checkbox" /><span>Custom...</span></label>
+            <label class="lens-chip lens-chip-none" id="lens-chip-none"><input type="checkbox" id="lens-none-checkbox" checked /><span>No restrictions</span></label>
+          </div>
+          <textarea
+            id="custom-lens-text"
+            class="custom-lens-text"
+            hidden
+            placeholder="e.g. low sodium, no added sugar, avoid shellfish"
+          ></textarea>
+        </div>
+
+        <div class="field">
+          <label for="servings-input" id="servings-label">Servings</label>
+          <input id="servings-input" type="number" inputmode="numeric" min="1" max="20" value="2" />
+        </div>
+
+        <div class="field" id="meal-count-field" hidden>
+          <label for="meal-count-input">How many meals this week?</label>
+          <input id="meal-count-input" type="number" inputmode="numeric" min="2" max="14" value="5" />
+          <div class="quick-picks" id="meal-count-quick-picks">
+            <button type="button" class="quick-pick" data-count="3">3</button>
+            <button type="button" class="quick-pick" data-count="5">5</button>
+            <button type="button" class="quick-pick" data-count="7">7</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="cuisine-input">Cuisine <span class="optional">(optional)</span></label>
+          <input id="cuisine-input" type="text" placeholder="e.g. Thai, Italian, Mexican..." autocomplete="off" />
+          <div class="quick-picks" id="cuisine-quick-picks">
+            <button type="button" class="quick-pick" data-cuisine="Italian">Italian</button>
+            <button type="button" class="quick-pick" data-cuisine="Mexican">Mexican</button>
+            <button type="button" class="quick-pick" data-cuisine="Thai">Thai</button>
+            <button type="button" class="quick-pick" data-cuisine="Indian">Indian</button>
+            <button type="button" class="quick-pick" data-cuisine="Mediterranean">Mediterranean</button>
+          </div>
+        </div>
+
+        <button id="find-recipes" class="btn-primary" disabled>Find recipes</button>
+        <p id="intake-error" class="error" hidden></p>
+      </div>
+    </section>
+
+    <!-- My saved recipes: a simple list, each item links to its own
+         standalone /recipes/{id} page (same-tab navigation, not popped
+         open) -- see static/app.js. -->
+    <section id="my-recipes" class="intake" hidden>
+      <div class="intake-inner">
+        <div class="my-recipes-header">
+          <button type="button" id="my-recipes-back" class="btn-ghost">← Back</button>
+          <h1 class="intake-title">My saved recipes</h1>
+        </div>
+        <div class="quick-picks" id="my-recipes-tabs">
+          <button type="button" class="quick-pick active" data-meal-type-filter="">All</button>
+          <button type="button" class="quick-pick" data-meal-type-filter="Breakfast">Breakfast</button>
+          <button type="button" class="quick-pick" data-meal-type-filter="Lunch">Lunch</button>
+          <button type="button" class="quick-pick" data-meal-type-filter="Dinner">Dinner</button>
+          <button type="button" class="quick-pick" data-meal-type-filter="Snack">Snack</button>
+        </div>
+        <div id="my-recipes-list"></div>
+      </div>
+    </section>
+
+    <!-- Chat view: shown after the intake form is submitted -->
+    <main id="chat" class="chat" hidden aria-live="polite"></main>
+
+    <form id="composer" class="composer" hidden>
+      <input
+        id="message-input"
+        type="text"
+        autocomplete="off"
+        placeholder="Ask for changes, e.g. more protein, no dairy..."
+        aria-label="Message"
+      />
+      <button id="send-btn" type="submit">Send</button>
+    </form>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

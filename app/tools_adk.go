@@ -37,28 +37,28 @@ type listLensPresetsResult struct {
 func newListLensPresetsTool(registry *core.Registry) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name: "list_lens_presets",
-		Description: "List all available dietary lenses (built-in and any custom ones " +
-			"created this session), so the agent can describe the options to the user.",
-	}, func(_ agent.Context, _ listLensPresetsArgs) (listLensPresetsResult, error) {
-		return listLensPresetsResult{Lenses: registry.ListLensPresets()}, nil
+		Description: "List all available dietary lenses (built-in, plus any custom ones this " +
+			"user has saved previously), so the agent can describe the options to the user.",
+	}, func(ctx agent.Context, _ listLensPresetsArgs) (listLensPresetsResult, error) {
+		return listLensPresetsResult{Lenses: registry.ListLensPresets(ctx.UserID())}, nil
 	})
 }
 
 // --- get_lens_preset -----------------------------------------------------
 
 type getLensPresetArgs struct {
-	Name string `json:"name" jsonschema:"the exact lens name, as returned by list_lens_presets"`
+	Names []string `json:"names" jsonschema:"one or more exact lens names, as returned by list_lens_presets. Pass all of the user's currently active lenses together (e.g. [\"Vegetarian\", \"GERD-Friendly\"]) to get back one merged view of every rule that applies at once, rather than calling this once per lens."`
 }
 
 type lensOutput struct {
-	Name              string   `json:"name" jsonschema:"lens name"`
+	Name              string   `json:"name" jsonschema:"the lens name, or -- if multiple names were requested -- all of their names joined with ' + ', representing their merged rules"`
 	AvoidIngredients  []string `json:"avoidIngredients" jsonschema:"ingredients/categories to avoid entirely"`
 	PreferIngredients []string `json:"preferIngredients" jsonschema:"ingredients/categories to favor when there's a choice"`
 	Calories          *int     `json:"calories,omitempty" jsonschema:"target calories per serving"`
 	ProteinG          *int     `json:"proteinG,omitempty" jsonschema:"target grams of protein per serving"`
 	CarbsG            *int     `json:"carbsG,omitempty" jsonschema:"target grams of carbohydrates per serving"`
 	FatG              *int     `json:"fatG,omitempty" jsonschema:"target grams of fat per serving"`
-	CustomRules       string   `json:"customRules" jsonschema:"free-text rules the agent should follow"`
+	CustomRules       string   `json:"customRules" jsonschema:"free-text rules the agent should follow, one bracketed [Lens Name] block per requested lens"`
 	NotesStyle        string   `json:"notesStyle" jsonschema:"how to explain ingredient choices to the user"`
 }
 
@@ -78,10 +78,13 @@ func toLensOutput(l core.DietaryLens) lensOutput {
 
 func newGetLensPresetTool(registry *core.Registry) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
-		Name:        "get_lens_preset",
-		Description: "Fetch the full definition of a dietary lens by name.",
-	}, func(_ agent.Context, args getLensPresetArgs) (lensOutput, error) {
-		lens, err := registry.GetLensPreset(args.Name)
+		Name: "get_lens_preset",
+		Description: "Fetch the full definition of one or more dietary lenses by name. When the " +
+			"user has more than one active lens (e.g. Vegetarian + GERD-Friendly), pass all their names in " +
+			"one call to get back the combined rule set -- see CombineLenses in core/tools.go for " +
+			"exactly how avoid/prefer lists, macro targets, and custom rules get merged.",
+	}, func(ctx agent.Context, args getLensPresetArgs) (lensOutput, error) {
+		lens, err := registry.CombineLenses(ctx.UserID(), args.Names)
 		if err != nil {
 			return lensOutput{}, err
 		}
@@ -109,11 +112,11 @@ type saveCustomLensResult struct {
 func newSaveCustomLensTool(registry *core.Registry) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name: "save_custom_lens",
-		Description: "Create (or overwrite) a custom dietary lens for this session. Use this " +
-			"when the user describes dietary goals that don't match an existing preset, so future " +
-			"recipe generation and compliance checks in this conversation can reuse it by name.",
-	}, func(_ agent.Context, args saveCustomLensArgs) (saveCustomLensResult, error) {
-		registry.SaveCustomLens(core.DietaryLens{
+		Description: "Create (or overwrite) a custom dietary lens for this user. Use this " +
+			"when the user describes dietary goals that don't match an existing preset, so this " +
+			"and future conversations with this user can reuse it by name.",
+	}, func(ctx agent.Context, args saveCustomLensArgs) (saveCustomLensResult, error) {
+		registry.SaveCustomLens(ctx.UserID(), core.DietaryLens{
 			Name:              args.Name,
 			AvoidIngredients:  args.AvoidIngredients,
 			PreferIngredients: args.PreferIngredients,
@@ -134,7 +137,7 @@ func newSaveCustomLensTool(registry *core.Registry) (tool.Tool, error) {
 type checkRecipeArgs struct {
 	RecipeTitle       string   `json:"recipeTitle" jsonschema:"the recipe's title, for reference in the result"`
 	Ingredients       []string `json:"ingredients" jsonschema:"the recipe's ingredient list (plain text entries)"`
-	LensName          string   `json:"lensName" jsonschema:"the name of the lens to check against, see list_lens_presets"`
+	LensNames         []string `json:"lensNames" jsonschema:"the name(s) of every currently active lens to check against, see list_lens_presets. Pass all of them together (e.g. [\"Vegetarian\", \"GERD-Friendly\"]) when the user has more than one active -- a recipe must satisfy all of them, not just one."`
 	Calories          *int     `json:"calories,omitempty" jsonschema:"the recipe's estimated calories per serving, if known"`
 	ProteinG          *int     `json:"proteinG,omitempty" jsonschema:"the recipe's estimated grams of protein per serving, if known"`
 	CarbsG            *int     `json:"carbsG,omitempty" jsonschema:"the recipe's estimated grams of carbohydrates per serving, if known"`
@@ -145,15 +148,18 @@ type checkRecipeArgs struct {
 func newCheckRecipeAgainstLensTool(registry *core.Registry) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name: "check_recipe_against_lens",
-		Description: "Validate a proposed recipe against a named dietary lens before presenting " +
-			"it to the user. Always call this after drafting a candidate recipe and before showing " +
-			"it to the user -- it performs a deterministic check (not another model call), so " +
-			"violations are caught reliably.",
-	}, func(_ agent.Context, args checkRecipeArgs) (core.CheckRecipeResult, error) {
+		Description: "Validate a proposed recipe against one or more active dietary lenses before " +
+			"presenting it to the user -- when several are active at once (e.g. Vegetarian + GERD-Friendly), " +
+			"pass all their names in lensNames and the recipe must satisfy every one of them, not just " +
+			"whichever lens happens to be checked. Always call this after drafting a candidate recipe " +
+			"and before showing it to the user -- it performs a deterministic check (not another model " +
+			"call), so violations are caught reliably.",
+	}, func(ctx agent.Context, args checkRecipeArgs) (core.CheckRecipeResult, error) {
 		return registry.CheckRecipeAgainstLens(core.CheckRecipeInput{
+			UserID:            ctx.UserID(),
 			RecipeTitle:       args.RecipeTitle,
 			Ingredients:       args.Ingredients,
-			LensName:          args.LensName,
+			LensNames:         args.LensNames,
 			Calories:          args.Calories,
 			ProteinG:          args.ProteinG,
 			CarbsG:            args.CarbsG,
@@ -163,42 +169,52 @@ func newCheckRecipeAgainstLensTool(registry *core.Registry) (tool.Tool, error) {
 	})
 }
 
-// --- export_recipe_to_doc -----------------------------------------------
+// --- propose_recipe -------------------------------------------------------
 
-type exportRecipeToDocArgs struct {
+type proposeRecipeArgs struct {
 	Title       string   `json:"title" jsonschema:"the recipe's title"`
-	Ingredients []string `json:"ingredients" jsonschema:"the recipe's ingredient list, with quantities"`
-	Steps       []string `json:"steps" jsonschema:"the recipe's numbered steps, in order"`
-	Notes       string   `json:"notes,omitempty" jsonschema:"optional notes, e.g. why this recipe fits the active dietary lens"`
+	Cuisine     string   `json:"cuisine,omitempty" jsonschema:"the recipe's cuisine style (e.g. Italian, Thai), if known or requested by the user"`
+	MealType    string   `json:"mealType,omitempty" jsonschema:"which meal this recipe is for -- exactly one of 'Breakfast', 'Lunch', 'Dinner', or 'Snack'. Use the user's stated meal type verbatim if they gave one. If they didn't, you may fill in whichever of the four the recipe itself unambiguously is (e.g. an omelette is 'Breakfast'), but leave this empty rather than guessing for a recipe that's genuinely fine at more than one (e.g. a grain bowl that works for lunch or dinner)."`
+	Servings    int      `json:"servings,omitempty" jsonschema:"how many servings this recipe (and its ingredient quantities) is scaled for"`
+	Ingredients []string `json:"ingredients" jsonschema:"the recipe's ingredient list, with rough quantities scaled to servings"`
+	Steps       []string `json:"steps" jsonschema:"the recipe's numbered preparation steps, in order"`
+	Calories    *int     `json:"calories,omitempty" jsonschema:"estimated calories per serving"`
+	ProteinG    *int     `json:"proteinG,omitempty" jsonschema:"estimated grams of protein per serving"`
+	CarbsG      *int     `json:"carbsG,omitempty" jsonschema:"estimated grams of carbohydrates per serving"`
+	FatG        *int     `json:"fatG,omitempty" jsonschema:"estimated grams of fat per serving"`
+	LensNote    string   `json:"lensNote,omitempty" jsonschema:"one-line note on why this recipe fits the active dietary lens"`
+	StorageNote string   `json:"storageNote,omitempty" jsonschema:"for meal-prep batches only: one-line note on how this recipe stores and reheats (e.g. 'fridge up to 4 days, microwave 2 min'); leave empty for a single tonight's-dinner recipe"`
+	// AdditionalIngredients is the shopping-list subset of Ingredients --
+	// see prompts.go step 2 for exactly what counts (not in the user's
+	// on-hand list, and not a pantry staple already being assumed).
+	AdditionalIngredients []string `json:"additionalIngredients,omitempty" jsonschema:"the subset of ingredients (copied verbatim from the ingredients list, quantity and all) that the user did NOT say they have on hand and will need to buy or get separately -- excluding common pantry staples you're already assuming (salt, oil, water, pepper, etc). Leave empty if every ingredient came from what the user listed."`
 }
 
-type exportRecipeToDocResult struct {
-	DocURL string `json:"docUrl" jsonschema:"the shareable edit URL of the newly created Google Doc"`
+type proposeRecipeResult struct {
+	Acknowledged bool `json:"acknowledged"`
 }
 
-func newExportRecipeToDocTool() (tool.Tool, error) {
+func newProposeRecipeTool() (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
-		Name: "export_recipe_to_doc",
-		Description: "Export a finalized recipe to a new Google Doc and return its shareable link. " +
-			"Only call this for a recipe the user has confirmed they want, and that already passed " +
-			"check_recipe_against_lens -- never export an unvalidated draft. Offer this after the " +
-			"user seems happy with a recipe; don't call it automatically on every revision.",
-	}, func(ctx agent.Context, args exportRecipeToDocArgs) (exportRecipeToDocResult, error) {
-		docURL, err := exportRecipeToDoc(ctx, FinalizedRecipe{
-			Title:       args.Title,
-			Ingredients: args.Ingredients,
-			Steps:       args.Steps,
-			Notes:       args.Notes,
-		})
-		if err != nil {
-			return exportRecipeToDocResult{}, err
-		}
-		return exportRecipeToDocResult{DocURL: docURL}, nil
+		Name: "propose_recipe",
+		Description: "Present one candidate recipe to the user in structured form, so the UI can " +
+			"render it as a recipe card. Call this once per recipe, immediately after it has passed " +
+			"check_recipe_against_lens with no unresolved violations -- never call this for an " +
+			"unvalidated recipe. This carries the full recipe details (ingredients, steps, macros); " +
+			"your own chat response should stay brief and conversational rather than repeating them. " +
+			"For a meal-prep batch, call this once per recipe in the batch and fill in storageNote.",
+	}, func(_ agent.Context, args proposeRecipeArgs) (proposeRecipeResult, error) {
+		return proposeRecipeResult{Acknowledged: true}, nil
 	})
 }
 
 // BuildTools constructs every tool the Recipe Concierge agent uses, backed
 // by the given lens registry (see core.NewRegistry / core.NewFirestoreRegistry).
+// Saving a recipe to view later isn't one of these -- see
+// ../cmd/pantrylens/frontend/frontend.go's POST /recipes -- since the
+// recipe's full details are already in the frontend's hands the moment
+// propose_recipe carries them there, so saving it is a plain structured
+// write with nothing for the agent to reason about.
 func BuildTools(registry *core.Registry) ([]tool.Tool, error) {
 	var tools []tool.Tool
 	for _, build := range []func() (tool.Tool, error){
@@ -206,7 +222,7 @@ func BuildTools(registry *core.Registry) ([]tool.Tool, error) {
 		func() (tool.Tool, error) { return newGetLensPresetTool(registry) },
 		func() (tool.Tool, error) { return newSaveCustomLensTool(registry) },
 		func() (tool.Tool, error) { return newCheckRecipeAgainstLensTool(registry) },
-		newExportRecipeToDocTool,
+		newProposeRecipeTool,
 	} {
 		t, err := build()
 		if err != nil {
