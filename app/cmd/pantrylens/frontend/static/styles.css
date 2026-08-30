@@ -113,9 +113,11 @@ body {
   transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-.btn-ghost:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+@media (hover: hover) {
+  .btn-ghost:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
 }
 
 .chat {
@@ -231,10 +233,12 @@ body {
   transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
-.composer button:hover:not(:disabled) {
-  background: var(--accent-hover);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+@media (hover: hover) {
+  .composer button:hover:not(:disabled) {
+    background: var(--accent-hover);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
 }
 
 .composer button:disabled {
@@ -307,8 +311,10 @@ body {
   transition: border-color 0.15s ease;
 }
 
-.saved-recipe-item:hover {
-  border-color: var(--accent);
+@media (hover: hover) {
+  .saved-recipe-item:hover {
+    border-color: var(--accent);
+  }
 }
 
 .saved-recipe-item .saved-recipe-title {
@@ -427,8 +433,10 @@ body {
   opacity: 0.7;
 }
 
-.chip button:hover {
-  opacity: 1;
+@media (hover: hover) {
+  .chip button:hover {
+    opacity: 1;
+  }
 }
 
 .mode-toggle {
@@ -452,8 +460,10 @@ body {
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.mode-option:hover {
-  color: var(--text);
+@media (hover: hover) {
+  .mode-option:hover {
+    color: var(--text);
+  }
 }
 
 .mode-option.active {
@@ -497,8 +507,15 @@ body {
   pointer-events: none;
 }
 
-.lens-chip:hover {
-  border-color: var(--accent);
+/* Gated to real-hover devices only -- on touch, an unguarded :hover rule
+   here eats the first tap (the browser applies :hover as if entering a
+   hover state instead of firing the click), so selecting a chip took two
+   taps: border-only on the first, the full :checked fill only on the
+   second. */
+@media (hover: hover) {
+  .lens-chip:hover {
+    border-color: var(--accent);
+  }
 }
 
 .lens-chip:has(input:checked) {
@@ -553,7 +570,13 @@ body {
   transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-.quick-pick:hover,
+@media (hover: hover) {
+  .quick-pick:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+}
+
 .quick-pick.active {
   border-color: var(--accent);
   color: var(--accent);
@@ -572,10 +595,12 @@ body {
   transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
-.btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+@media (hover: hover) {
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
 }
 
 .btn-primary:disabled {
@@ -708,8 +733,10 @@ body {
   transition: border-color 0.15s ease;
 }
 
-.export-btn:hover {
-  border-color: var(--accent);
+@media (hover: hover) {
+  .export-btn:hover {
+    border-color: var(--accent);
+  }
 }
 
 .export-btn:disabled {
@@ -735,8 +762,10 @@ body {
   text-decoration: none;
 }
 
-.view-saved-link:hover {
-  text-decoration: underline;
+@media (hover: hover) {
+  .view-saved-link:hover {
+    text-decoration: underline;
+  }
 }
 
 .save-all-row {
@@ -759,10 +788,12 @@ body {
   transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
-.save-all-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+@media (hover: hover) {
+  .save-all-btn:hover:not(:disabled) {
+    background: var(--accent-hover);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
 }
 
 .save-all-btn:disabled {
