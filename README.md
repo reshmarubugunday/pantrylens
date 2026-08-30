@@ -1,88 +1,80 @@
-# pantrylens
+# PantryLens
 
-PantryLens turns your fridge ingredients into recipes that fit your dietary rules, refined through conversation, then exported ready-to-cook.
+Turn the ingredients in your kitchen into recipes that fit your dietary
+rules — combine any number of "lenses" (allergen, macro, or health-condition
+constraints), refine recipes conversationally, and every candidate is
+checked by a deterministic Go function before it's ever shown to you.
 
-## Go port
+**Track:** Collaborative Partner · **Live demo:**
+https://pantrylens-765410575676.us-central1.run.app
 
-This mirrors the Python scaffold, ported to Go on top of the official
-`google/adk-go` (module `google.golang.org/adk/v2`), which is GA and has
-full parity with the Python SDK for tools, multi-turn agents, and Gemini.
+## Architecture
 
-## Two modules, on purpose
+```mermaid
+flowchart TD
+    Browser["Browser<br/>(PantryLens web UI)"]
 
-```
-core/     module: pantrylens/core   -- lens model + compliance logic, no external deps;
-                                        Firestore is an opt-in storage backend (see below)
-app/      module: pantrylens/app    -- imports google.golang.org/adk/v2, genai
-```
+    subgraph CloudRun["Cloud Run: pantrylens"]
+        UI["ui sublauncher<br/>app/cmd/pantrylens/frontend<br/>static chat UI + /profile, /recipes,<br/>/detect-ingredients REST endpoints"]
+        API["api sublauncher<br/>ADK REST API<br/>/api/apps/.../sessions, /api/run"]
+        Agent["Recipe Concierge agent<br/>google.golang.org/adk/v2<br/>tools: list_lens_presets, get_lens_preset,<br/>save_custom_lens, check_recipe_against_lens,<br/>propose_recipe"]
+        Core["core package<br/>deterministic lens-compliance checker<br/>(no model call, own test suite)"]
+    end
 
-`core` holds the dietary-lens model and the deterministic compliance-check
-logic — the same split as the Python version's `tools.py`, just made
-structural here instead of a comment. The lens model, the compliance
-checker, and their tests (`core/tools_test.go`) import nothing but the Go
-standard library: `gofmt`, `go vet`, and `go test` all run clean with zero
-setup, 8/8 tests passing. The one exception is `core/firestore_store.go`,
-an opt-in `LensStore` implementation pulled in only if you use
-`core.NewFirestoreRegistry` (see "Firestore-backed lens storage" below) --
-it's the only file in the module that imports anything beyond stdlib, and
-the existing tests don't exercise it.
+    Gemini["Gemini 3.5 Flash<br/>via Vertex AI"]
+    Firestore[("Firestore<br/>dietary_lenses, saved_recipe_refs,<br/>saved_recipes, users/{id} preferences")]
+    Vision["Gemini vision<br/>(photo -> ingredient list)"]
 
-`app` is the ADK wiring — the agent, the tool adapters, the CLI entrypoint.
-It's written directly against the real, current ADK Go API (I read the
-actual `google/adk-go` source — `tool/functiontool/function.go`,
-`examples/tools/multipletools/main.go`, `agent/llmagent/llmagent.go`,
-`runner/runner.go` — rather than guessing at method names). **It could not
-be compiled in that environment**: `google.golang.org/adk/v2` requires Go
-1.26+ (that environment had 1.24.7) and fetching the module needs open
-network access to `proxy.golang.org` / `google.golang.org` (that
-environment's egress is allowlisted to a smaller set of hosts and blocked
-both). `gofmt` confirms every file in `app/` is syntactically valid Go;
-what's unverified is that the ADK API calls type-check exactly as written
-against the live dependency versions. Run the setup below on your own
-machine (or Cloud Shell) to find out, and treat the first `go build` as a
-real check, not a formality.
-
-## Setup
-
-**1. Install Go 1.26+.** Check with `go version` — if you're on an older
-version, grab the latest from https://go.dev/dl/.
-
-**2. Resolve dependencies** (this is the step that couldn't run in the
-scaffolding environment):
-
-```bash
-cd app
-go mod tidy
+    Browser <-->|same-origin fetch| UI
+    Browser <-->|same-origin fetch| API
+    API --> Agent
+    Agent --> Core
+    Agent -->|generate + validate recipes| Gemini
+    UI -->|POST /detect-ingredients| Vision
+    UI -->|save/list/view recipes,<br/>read/write preferences| Firestore
+    Agent -->|custom lenses| Firestore
 ```
 
-This pulls in `google.golang.org/adk/v2` and `google.golang.org/genai` at
-their current versions and rewrites `go.mod`/`go.sum` accordingly — the
-version numbers in `app/go.mod` right now are placeholders, don't rely on
-them.
+`core` is the trust boundary: it's a dependency-free Go package (own module,
+`pantrylens/core`) holding the dietary-lens model and
+`CheckRecipeAgainstLens`, a deterministic function, not another model call.
+Every candidate recipe the agent drafts has to pass this check before
+`propose_recipe` renders it as a card — the system doesn't rely on the model
+getting dietary safety right on its own. `app` (module `pantrylens/app`)
+is everything that talks to Google APIs: the ADK agent and tool wiring,
+Gemini/Vertex AI, Firestore, and the web UI.
 
-**3. Build and vet:**
+## What it does
 
-```bash
-go build ./...
-go vet ./...
-```
+- **Combine any number of dietary lenses at once** — 13 built-in presets
+  (GERD-Friendly, Hormonal Balance, Macro Target, Athletic Performance,
+  Vegetarian, Vegan, Diabetic-Friendly, Heart-Healthy, Gluten-Free,
+  Dairy-Free, Keto, Low-FODMAP, Kidney-Friendly), or describe your own goals
+  in plain language and the agent saves it as a reusable custom lens. Active
+  lenses combine (e.g. Vegetarian + GERD-Friendly + a custom "no cilantro"
+  rule) — `Registry.CombineLenses` merges every active lens's avoid/prefer
+  lists, macro targets, and rules into one set a recipe must satisfy
+  simultaneously, not just whichever lens happened to get checked.
+- **Add ingredients by typing, pasting a list, or a photo** — photo-based
+  detection runs a one-shot Gemini vision call constrained to a JSON
+  ingredient-list schema.
+- **Ask for one meal or a whole week of meal prep** — meal-prep requests
+  (via the intake form's toggle, or just asked for in chat) get a full
+  batch of recipes that deliberately share ingredients with each other,
+  each with a storage/reheat note, and a "Save all" action.
+  You choose the meal type (breakfast/lunch/dinner/snack) — the agent
+  never assumes dinner.
+- **Refine conversationally** — "more protein," "no dairy," "use up the
+  spinach" all work as follow-ups; a session survives a page refresh
+  (resumed from ADK's own session history, no separate persistence layer).
+- **Save recipes, filterable by meal type** — each recipe gets its own
+  shareable page; "My saved recipes" groups meal-prep batches together and
+  filters by Breakfast/Lunch/Dinner/Snack.
 
-If something doesn't type-check, it's most likely one of two things: the
-`jsonschema` struct tag usage in `tools_adk.go` (I confirmed the tag syntax
-— bare description text, e.g. `` `jsonschema:"lens name"` `` — against the
-`google/jsonschema-go` docs, but haven't run it against a real schema
-build), or a signature drift in `functiontool.New` / `llmagent.New` /
-`gemini.NewModel` if the library shipped a breaking change after this was
-written. Both are quick fixes if you hit them — the shapes are right even
-if a detail needs adjusting.
+## Quickstart (local)
 
-## Using your $300 GCP credit
-
-Same gotcha as the Python version: a plain AI Studio API key does **not**
-draw against a GCP trial credit — you need Vertex AI inside a real GCP
-project with billing attached. Full walkthrough (project creation, billing,
-`gcloud` setup, enabling APIs, Firestore) is in the Python scaffold's
-README; the short version for this Go port:
+Requires Go 1.26+ and a GCP project with billing enabled (Vertex AI, not a
+plain AI Studio key, so usage draws against GCP credit).
 
 ```bash
 gcloud auth application-default login
@@ -91,103 +83,84 @@ gcloud services enable aiplatform.googleapis.com firestore.googleapis.com run.go
 
 export GOOGLE_GENAI_USE_ENTERPRISE=1
 export GOOGLE_CLOUD_PROJECT=your-real-project-id
-export GOOGLE_CLOUD_LOCATION=global
+export GOOGLE_CLOUD_LOCATION=global   # must be "global", not a region -- see note below
+
+cd app
+go mod tidy
+go build ./... && go vet ./...
+
+cd cmd/pantrylens
+go run . web -write-timeout=180s -read-timeout=180s ui api
+# open http://localhost:8080
 ```
 
-`gemini.NewModel` in `app/agent.go` is called with an empty
-`&genai.ClientConfig{}`, which resolves backend/project/location from
-those env vars automatically — no API key needed in this mode.
+`go run . console` also works, for a terminal-only chat without the web UI.
 
-**Use `global` for `GOOGLE_CLOUD_LOCATION`, not a specific region.**
-Confirmed live against a real project: `gemini-3.5-flash` 404s as a
-publisher model on regional endpoints (e.g. `us-central1`) but resolves
-fine on `global`. `GOOGLE_CLOUD_LOCATION` only affects where the Gemini
-client sends requests here (Firestore, if you're using it, resolves its
-own location from the database itself, not this env var), so this is safe
-to set globally without affecting anything else.
+**`GOOGLE_CLOUD_LOCATION` must be `global`, not a region** — confirmed live,
+`gemini-3.5-flash` 404s as a Vertex publisher model on regional endpoints
+(e.g. `us-central1`) but resolves on `global`. This only affects where the
+Gemini client sends requests; Firestore resolves its own location from the
+database itself.
 
-## Run it
+**`-write-timeout`/`-read-timeout` matter** — ADK's 15s default is too
+short for a multi-recipe turn (draft → `check_recipe_against_lens` →
+`propose_recipe` per candidate routinely takes 20–40s, longer for a
+meal-prep batch); at the default, the connection is killed right as the
+response is ready.
 
-```bash
-cd app/cmd/pantrylens
-go run . console      # chat with the agent in your terminal
-go run . web ui api   # local web server: PantryLens's own UI + its REST API
-```
+Firestore is optional for local dev: if it's unset or unreachable, lenses,
+preferences, and saved recipes fall back to in-memory automatically (see
+"Firestore-backed storage" below) and everything else still works.
 
-Note: `web` alone starts no sub-servers -- sub-launchers must be named
-explicitly. Confirmed against a live ADK v2.0.0 build.
-
-`ui` is PantryLens's own frontend (`app/cmd/pantrylens/frontend`), not
-ADK's built-in `webui` -- see "PantryLens's own web UI" below for why.
-
-## Run the core tests (works right now, no setup needed)
+## Run the core tests (no GCP setup needed)
 
 ```bash
 cd core
 go test ./... -v
 ```
 
-## Important: verify the model name before you submit
+`core` imports nothing but the Go standard library (`core/firestore_store.go`
+is the one opt-in exception, only pulled in via `core.NewFirestoreRegistry`
+etc.) — `gofmt`, `go vet`, and `go test` all run clean with zero setup.
 
-`ModelName` in `app/agent.go` is now `"gemini-3.5-flash"` — matching the
-pinned `google.golang.org/genai` SDK's own current example code, not a
-placeholder anymore. **The hackathon requires Gemini 3.5 Flash or newer.**
-Model availability can still vary by GCP project/region, so run the agent
-once against your own project (`go run . console`) and confirm you get a
-real response, not a model-not-found error, before you submit. If it's
-unavailable, check Model Garden for the closest current name.
+## Firestore-backed storage
 
-## A known simplification, called out on purpose
-
-Same as the Python version: `core.CheckRecipeAgainstLens`'s `mentions()`
-helper matches on literal words/token-overlap, not food-category knowledge.
-An avoid-entry of `"citrus"` won't infer that `"orange juice"` is a citrus
-product. See the doc comment above `mentions()` in `core/tools.go` for the
-full explanation — it's a fine thing to mention in the submission's
-"learnings" section.
-
-## Firestore-backed lens storage (optional)
-
-By default the agent uses an in-memory lens registry (`core.NewRegistry`) --
-custom lenses created via `save_custom_lens` live only for the process's
-lifetime. Set `GOOGLE_CLOUD_PROJECT` and the agent will instead use
-`core.NewFirestoreRegistry` (collection `dietary_lenses`), so custom lenses
-survive restarts -- useful once you're running on Cloud Run, where a cold
-start would otherwise lose them. If Firestore construction fails for any
-reason (auth, network), it logs a warning and falls back to in-memory, so
-local/offline dev keeps working unchanged. Built-in presets always work
-either way -- they come from `BuiltInLenses()`, not the store.
+By default the agent uses in-memory stores for custom lenses, saved
+recipes, and per-user preferences (last servings/cuisine) — fine for a demo,
+lost on restart. Set `GOOGLE_CLOUD_PROJECT` and the app switches to
+Firestore-backed implementations instead (`core.NewFirestoreRegistry`,
+`app.NewRecipeStore`, `app.NewPreferenceStore`) so all of it survives a
+restart or a Cloud Run cold start. If Firestore construction fails for any
+reason (auth, network), each store logs a warning and falls back to
+in-memory rather than failing to start. Built-in lens presets always work
+either way — they come from `BuiltInLenses()`, not the store.
 
 ## Saving and viewing a recipe
 
-Every recipe card has its own "Save & view" button. Clicking it `POST`s the
-card's full details to `/recipes` (see `app/cmd/pantrylens/frontend
-/frontend.go` and `recipe_view.go`), which mints a random ID, persists it via
-`core.RecipeStore` (Firestore-backed when `GOOGLE_CLOUD_PROJECT` is set, same
-fallback-to-in-memory pattern as the lens registry and preference store --
-see `app/agent.go`'s `NewRecipeStore`), and opens `/recipes/{id}` in a new
-tab: a standalone page reusing the exact same `.recipe-card` styling as the
-in-chat card (same `styles.css`, same origin), not a Google Doc or any other
-external service -- nothing here needs Drive/Docs scopes or credentials
-beyond what Vertex AI and Firestore already use.
+Every recipe card has a "Save recipe" button. Clicking it `POST`s the
+card's full details to `/recipes` (see
+`app/cmd/pantrylens/frontend/frontend.go` and `recipe_view.go`), which mints
+a random ID, persists it via `core.RecipeStore`, and shows an inline
+confirmation with a link to `/recipes/{id}` — a standalone page reusing the
+same `.recipe-card` styling as the in-chat card. Saving never navigates
+anywhere on its own; opening the saved page is always an explicit click.
 
 ## PantryLens's own web UI
 
 ADK's built-in `webui` sublauncher is a developer console (Events/Traces/
-State/Artifacts panels) -- useful for debugging, but not something you'd
-want to show a hackathon judge as "the product." `app/cmd/pantrylens/frontend`
-is a small, self-contained chat frontend (plain HTML/CSS/JS, no build step)
-registered as its own `ui` sublauncher instead, serving at `/` and talking
-to ADK's REST API at same-origin `/api/...`. Being same-origin means no
-CORS/public-URL configuration is needed -- a real advantage over `webui`,
-whose browser-side JS defaults to calling back to
-`http://localhost:8080/api`, which only works when server and browser share
-a machine (not true on Cloud Run without extra configuration).
+State/Artifacts panels) — useful for debugging, not something to show a
+user as "the product." `app/cmd/pantrylens/frontend` is a small,
+self-contained chat frontend (plain HTML/CSS/JS, no build step) registered
+as its own `ui` sublauncher instead, serving at `/` and talking to ADK's
+REST API at same-origin `/api/...`. Being same-origin means no CORS/public-
+URL configuration is needed — a real advantage over `webui`, whose
+browser-side JS defaults to calling back to `http://localhost:8080/api`,
+which only works when server and browser share a machine.
 
 ## Deploy to Cloud Run
 
-The `web` launcher already binds `:8080` on all interfaces by default, which
-matches what Cloud Run expects, so no code changes are needed beyond what's
+The `web` launcher already binds `:8080` on all interfaces by default,
+matching what Cloud Run expects — no code changes needed beyond what's
 already in the `Dockerfile`:
 
 ```bash
@@ -197,18 +170,24 @@ gcloud run deploy pantrylens --source . --region us-central1 \
 
 gcloud projects add-iam-policy-binding your-project-id \
   --member="serviceAccount:<cloud-run-service-account>" --role="roles/aiplatform.user"
-# If using Firestore-backed lens storage too:
 gcloud projects add-iam-policy-binding your-project-id \
   --member="serviceAccount:<cloud-run-service-account>" --role="roles/datastore.user"
 ```
 
-Use `global` for `GOOGLE_CLOUD_LOCATION`, not a specific region -- see
-above. Demo the whole ingredients → lens → recipe → save-and-view loop
-through the deployed URL; nothing in it needs local-only credentials.
+Demo the whole ingredients → lens → recipe → save loop through the deployed
+URL; nothing in it needs local-only credentials.
 
-## Next step in the plan
+## A known simplification, called out on purpose
 
-See the hackathon completion plan for the remaining prioritized work
-(live model-name verification, scripted multi-turn QA, and Devpost
-submission prep) -- the core loop, save-and-view, Firestore-backed storage,
-and Cloud Run deployment described above are implemented.
+`core.CheckRecipeAgainstLens`'s `mentions()` helper matches on literal
+words/token overlap, not food-category knowledge — an avoid-rule for
+`"citrus"` won't infer that `"orange juice"` is a citrus product. That would
+need a synonym/category table or a second model call, scoped out
+deliberately. The agent's own instructions are the first line of defense on
+category-level judgment; the deterministic checker is a safety net on top
+of that, not a substitute for it.
+
+A saved recipe's link is unguessable (a random 128-bit ID) but not
+access-controlled or expiring — anyone with the link can view it, forever.
+Fine for a demo; a production version would add expiry and/or scope links
+to the user who saved them.
