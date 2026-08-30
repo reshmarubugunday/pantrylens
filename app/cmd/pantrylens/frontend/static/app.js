@@ -60,6 +60,7 @@ const mealTypeQuickPicks = document.getElementById("meal-type-quick-picks");
 const cuisineInput = document.getElementById("cuisine-input");
 const cuisineQuickPicks = document.getElementById("cuisine-quick-picks");
 const findRecipesBtn = document.getElementById("find-recipes");
+const ingredientsHintEl = document.getElementById("ingredients-hint");
 const intakeErrorEl = document.getElementById("intake-error");
 
 let userId = localStorage.getItem("pantrylens_user_id");
@@ -121,6 +122,7 @@ function renderIngredientChips() {
     ingredientChipsEl.appendChild(chip);
   });
   findRecipesBtn.disabled = ingredients.length === 0;
+  ingredientsHintEl.hidden = ingredients.length !== 0;
 }
 
 // addIngredientsFromText splits on commas AND newlines, so a single paste
