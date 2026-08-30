@@ -329,10 +329,36 @@ body {
   font-size: 14.5px;
 }
 
+.saved-recipe-item .saved-recipe-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 .saved-recipe-item .saved-recipe-date {
   color: var(--text-muted);
   font-size: 12.5px;
   white-space: nowrap;
+}
+
+.saved-recipe-delete {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px;
+  opacity: 0.6;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+@media (hover: hover) {
+  .saved-recipe-delete:hover {
+    opacity: 1;
+    color: var(--violation);
+  }
 }
 
 .saved-recipes-empty {

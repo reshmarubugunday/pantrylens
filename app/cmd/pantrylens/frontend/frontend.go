@@ -49,9 +49,10 @@ type sublauncher struct {
 // conversational tool loop): GET/PUT /profile/{userID} for prefilling and
 // remembering servings/cuisine, POST /detect-ingredients for photo-based
 // ingredient detection, and POST /recipes + GET /recipes?userId=... + GET
-// /recipes/{id} for saving a recipe, listing "My saved recipes" for a
-// user, and viewing one specific saved recipe's own standalone page (see
-// static/app.js for all of these). Saves are scoped to userID (the same
+// /recipes/{id} + DELETE /recipes/{id}?userId=... for saving, listing
+// "My saved recipes" for a user, viewing one specific saved recipe's own
+// standalone page, and removing one from that list (see static/app.js for
+// all of these). Saves are scoped to userID (the same
 // anonymous, device-local ID the profile endpoints already use -- there's
 // no login in this app) so a listing only shows what that browser saved,
 // but a specific recipe's view link works for anyone who has it,
@@ -87,6 +88,7 @@ func (s *sublauncher) SetupSubrouters(router *mux.Router, _ *launcher.Config) er
 	router.HandleFunc("/recipes", s.saveRecipe).Methods(http.MethodPost)
 	router.HandleFunc("/recipes", s.listRecipes).Methods(http.MethodGet)
 	router.HandleFunc("/recipes/{id}", s.viewRecipe).Methods(http.MethodGet)
+	router.HandleFunc("/recipes/{id}", s.deleteRecipe).Methods(http.MethodDelete)
 
 	sub, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -315,6 +317,26 @@ func (s *sublauncher) viewRecipe(w http.ResponseWriter, r *http.Request) {
 		// a half-rendered page rather than fixing anything -- log instead.
 		log.Printf("viewRecipe: render %s: %v", id, err)
 	}
+}
+
+// deleteRecipe removes a recipe from "My saved recipes" -- userId is
+// required (as a query param, same as GET /recipes) since RecipeStore.Delete
+// only removes it from that user's own list; a mismatched or missing
+// userId is treated as a no-op by the store, not an error, so this always
+// responds 204 rather than needing to distinguish "already gone" from
+// "not yours" for the caller.
+func (s *sublauncher) deleteRecipe(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	userID := r.URL.Query().Get("userId")
+	if userID == "" {
+		http.Error(w, "userId is required", http.StatusBadRequest)
+		return
+	}
+	if err := s.recipes.Delete(userID, id); err != nil {
+		http.Error(w, "couldn't delete that recipe: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *sublauncher) UserMessage(webURL string, printer func(v ...any)) {

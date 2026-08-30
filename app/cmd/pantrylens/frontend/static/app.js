@@ -826,12 +826,52 @@ function renderSavedRecipesList(recipes, activeFilter) {
       const date = document.createElement("span");
       date.className = "saved-recipe-date";
       date.textContent = formatSavedDate(r.savedAt);
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "saved-recipe-delete";
+      deleteBtn.setAttribute("aria-label", `Delete ${r.title || "this recipe"}`);
+      deleteBtn.textContent = "✕";
+      deleteBtn.addEventListener("click", (e) => {
+        // Nested inside the <a> that opens the recipe -- without these,
+        // clicking delete would also navigate.
+        e.preventDefault();
+        e.stopPropagation();
+        deleteSavedRecipe(r.id);
+      });
+      // Grouped so item's own space-between (title <-> everything else)
+      // keeps date+delete paired together on the right, not spread apart.
+      const meta = document.createElement("span");
+      meta.className = "saved-recipe-meta";
+      meta.appendChild(date);
+      meta.appendChild(deleteBtn);
       item.appendChild(title);
-      item.appendChild(date);
+      item.appendChild(meta);
       list.appendChild(item);
     });
   });
   myRecipesListEl.appendChild(list);
+}
+
+// deleteSavedRecipe confirms, then removes a recipe from "My saved
+// recipes" -- an explicit native confirm() since this is destructive and
+// has no undo, same reasoning as any other delete action. Updates
+// savedRecipesCache and re-renders locally instead of refetching the whole
+// list, since the DELETE response already tells us it's gone.
+async function deleteSavedRecipe(id) {
+  if (!confirm("Delete this saved recipe? This can't be undone.")) return;
+  try {
+    const res = await fetch(`/recipes/${encodeURIComponent(id)}?userId=${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText}: ${body}`);
+    }
+    savedRecipesCache = savedRecipesCache.filter((r) => r.id !== id);
+    renderFilteredSavedRecipes();
+  } catch (err) {
+    alert("Couldn't delete that recipe: " + err.message);
+  }
 }
 
 function closeMyRecipes() {

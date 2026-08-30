@@ -71,6 +71,11 @@ type RecipeStore interface {
 	Get(id string) (SavedRecipe, bool)
 	// List returns userID's saved recipes, most recently saved first.
 	List(userID string) []SavedRecipeSummary
+	// Delete removes id from userID's saved recipes. It's a no-op (not an
+	// error) if id doesn't exist or wasn't saved by userID -- deleting
+	// something already gone, or someone else's recipe by guessing its ID,
+	// both end in the same "not there" state either way.
+	Delete(userID, id string) error
 }
 
 type inMemoryRecipeStore struct {
@@ -110,4 +115,18 @@ func (s *inMemoryRecipeStore) List(userID string) []SavedRecipeSummary {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]SavedRecipeSummary(nil), s.byUser[userID]...)
+}
+
+func (s *inMemoryRecipeStore) Delete(userID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	summaries := s.byUser[userID]
+	for i, sum := range summaries {
+		if sum.ID == id {
+			s.byUser[userID] = append(summaries[:i], summaries[i+1:]...)
+			delete(s.recipes, id)
+			return nil
+		}
+	}
+	return nil
 }

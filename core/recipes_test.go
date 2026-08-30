@@ -117,3 +117,54 @@ func TestRecipeStoreCarriesMealTypeThrough(t *testing.T) {
 		t.Errorf("expected MealType %q on the full saved recipe, got %q (ok=%v)", "Breakfast", recipe.MealType, ok)
 	}
 }
+
+func TestRecipeStoreDeleteRemovesFromGetAndList(t *testing.T) {
+	s := NewRecipeStore()
+	if err := s.Save("user-1", "recipe-1", SavedRecipe{Title: "Ginger Greens Bowl"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := s.Delete("user-1", "recipe-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := s.Get("recipe-1"); ok {
+		t.Error("expected the recipe to be gone after Delete")
+	}
+	if list := s.List("user-1"); len(list) != 0 {
+		t.Errorf("expected an empty list after Delete, got %v", list)
+	}
+}
+
+func TestRecipeStoreDeleteIsNoOpForWrongUserOrUnknownID(t *testing.T) {
+	s := NewRecipeStore()
+	if err := s.Save("user-1", "recipe-1", SavedRecipe{Title: "Ginger Greens Bowl"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if err := s.Delete("user-2", "recipe-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := s.Get("recipe-1"); !ok {
+		t.Error("expected user-2 deleting user-1's recipe to be a no-op, but it was removed")
+	}
+
+	if err := s.Delete("user-1", "no-such-id"); err != nil {
+		t.Errorf("expected deleting an unknown ID to be a no-op, got error: %v", err)
+	}
+}
+
+func TestRecipeStoreDeleteOnlyRemovesTargetRecipe(t *testing.T) {
+	s := NewRecipeStore()
+	if err := s.Save("user-1", "recipe-1", SavedRecipe{Title: "First"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := s.Save("user-1", "recipe-2", SavedRecipe{Title: "Second"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := s.Delete("user-1", "recipe-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	list := s.List("user-1")
+	if len(list) != 1 || list[0].Title != "Second" {
+		t.Errorf("expected only recipe-2 to remain, got %v", list)
+	}
+}

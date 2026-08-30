@@ -366,6 +366,26 @@ func (s *firestoreRecipeStore) Get(id string) (SavedRecipe, bool) {
 	return fromFirestoreRecipeDoc(d), true
 }
 
+// Delete checks the per-user ref doc exists before touching anything --
+// that doc's presence under userID's own subcollection IS the ownership
+// check (see savedRecipeRefsCollection's doc comment), so a delete request
+// for someone else's recipe ID just finds nothing to delete rather than
+// needing a separate authorization check.
+func (s *firestoreRecipeStore) Delete(userID, id string) error {
+	ctx := context.Background()
+	ref := s.client.Collection(usersCollection).Doc(sanitizeUserID(userID)).Collection(savedRecipeRefsCollection).Doc(id)
+	if _, err := ref.Get(ctx); err != nil {
+		return nil
+	}
+	if _, err := ref.Delete(ctx); err != nil {
+		return fmt.Errorf("delete recipe %s index: %w", id, err)
+	}
+	if _, err := s.client.Collection(savedRecipesCollection).Doc(id).Delete(ctx); err != nil {
+		return fmt.Errorf("delete recipe %s: %w", id, err)
+	}
+	return nil
+}
+
 // NewFirestoreRecipeStore returns a RecipeStore backed by Firestore (see
 // savedRecipesCollection) instead of an in-memory map.
 func NewFirestoreRecipeStore(ctx context.Context, projectID string) (RecipeStore, error) {
