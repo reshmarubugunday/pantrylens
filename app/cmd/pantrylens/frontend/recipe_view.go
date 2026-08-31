@@ -3,6 +3,7 @@ package frontend
 import (
 	"fmt"
 	"html/template"
+	"net/url"
 
 	"pantrylens/core"
 )
@@ -67,6 +68,7 @@ const recipeViewTemplate = `<!doctype html>
       </div>
       {{if .LensNote}}<p class="lens-note">✓ {{.LensNote}}</p>{{end}}
       {{if .StorageNote}}<p class="storage-note">🧊 {{.StorageNote}}</p>{{end}}
+      {{if .VideoSearchURL}}<p class="video-link"><a href="{{.VideoSearchURL}}" target="_blank" rel="noopener">🎥 Watch recipe videos on YouTube</a></p>{{end}}
     </div>
   </main>
 </div>
@@ -103,6 +105,20 @@ type recipeViewData struct {
 	StorageNote           string
 	AdditionalIngredients []string
 	MealPrepBatch         string
+	VideoSearchURL        string
+}
+
+// youTubeSearchURL builds a YouTube search-results link for a recipe title
+// -- deliberately a search page, not a lookup for one specific video: no
+// API key, no quota, and it never 404s the way pinning to one video ID
+// would if that video were ever taken down. static/app.js's addRecipeCard
+// builds the identical URL client-side for the in-chat card, since it has
+// the title before any save/view round-trip happens.
+func youTubeSearchURL(title string) string {
+	if title == "" {
+		return ""
+	}
+	return "https://www.youtube.com/results?search_query=" + url.QueryEscape(title+" recipe")
 }
 
 // toRecipeViewData mirrors static/app.js's macroChip()/addRecipeCard
@@ -118,6 +134,7 @@ func toRecipeViewData(r core.SavedRecipe) recipeViewData {
 		StorageNote:           r.StorageNote,
 		AdditionalIngredients: r.AdditionalIngredients,
 		MealPrepBatch:         r.MealPrepBatch,
+		VideoSearchURL:        youTubeSearchURL(r.Title),
 	}
 	if r.Servings > 0 {
 		unit := "servings"

@@ -419,6 +419,16 @@ function macroChip(value, unit, label) {
   return span;
 }
 
+// youTubeSearchURL builds a YouTube search-results link for a recipe title
+// -- deliberately a search page, not a lookup for one specific video: no
+// API key, no quota, and it never 404s the way pinning to one video ID
+// would if that video were ever taken down. recipe_view.go's
+// youTubeSearchURL builds the identical URL server-side for the saved
+// standalone page.
+function youTubeSearchURL(title) {
+  return "https://www.youtube.com/results?search_query=" + encodeURIComponent(title + " recipe");
+}
+
 function addRecipeCard(args) {
   const card = document.createElement("div");
   card.className = "recipe-card";
@@ -520,6 +530,18 @@ function addRecipeCard(args) {
     note.className = "storage-note";
     note.textContent = "🧊 " + args.storageNote;
     card.appendChild(note);
+  }
+
+  if (args.title) {
+    const videoLink = document.createElement("p");
+    videoLink.className = "video-link";
+    const a = document.createElement("a");
+    a.href = youTubeSearchURL(args.title);
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = "🎥 Watch recipe videos on YouTube";
+    videoLink.appendChild(a);
+    card.appendChild(videoLink);
   }
 
   // args's fields already match POST /recipes's body shape exactly (see

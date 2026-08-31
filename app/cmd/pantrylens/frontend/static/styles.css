@@ -735,6 +735,23 @@ body {
   color: var(--text-muted);
 }
 
+.video-link {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.video-link a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+@media (hover: hover) {
+  .video-link a:hover {
+    text-decoration: underline;
+  }
+}
+
 .shopping-note {
   margin: 0;
   font-size: 12.5px;
